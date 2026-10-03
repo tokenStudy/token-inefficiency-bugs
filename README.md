@@ -1,10 +1,10 @@
-# Where Do the Tokens Go? Characterizing Token Inefficiency Bugs in LLM Agent Harnesses
+# Who Is Burning My Tokens? Characterizing Token Inefficiency Bugs in LLM Agent Harnesses
 
 [![license: MIT](https://img.shields.io/badge/code-MIT-green.svg)](LICENSE)
 [![data: CC BY 4.0](https://img.shields.io/badge/data-CC%20BY%204.0-blue.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![python: 3.9+](https://img.shields.io/badge/python-3.9%2B-lightgrey.svg)](https://www.python.org/)
 
-This repository accompanies the paper *Where Do the Tokens Go? Characterizing Token Inefficiency Bugs in LLM Agent
+This repository accompanies the paper *Who Is Burning My Tokens? Characterizing Token Inefficiency Bugs in LLM Agent
 Harnesses*. It contains the 486 token inefficiency (TI) bugs that the study labeled, the code that collects the candidate
 cases from GitHub, and a script that computes the main results of RQ1-RQ3 from the labeled bugs.
 
