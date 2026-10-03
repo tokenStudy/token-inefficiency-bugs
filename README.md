@@ -27,9 +27,9 @@ token-inefficiency-bugs/
 │   └── ti_bugs.csv              # the 486 labeled TI bugs (one row per bug)
 ├── code/
 │   ├── step1_collect.py         # Step 1: keyword search of 50 harnesses; merged PRs and the issues they close
-│   ├── step2_classify.py        # Step 2: word filter and LLM classifier (the prompt is in this file); candidate cases
+│   ├── step2_classify.py        # Step 2: word filter and LLM classifier (the prompt is in this file)
 │   ├── step3_results.py         # Step 3: results of RQ1-RQ3 computed from data/ti_bugs.csv (standard library only)
-│   ├── config.example.yaml      # configuration; API keys are read from environment variables
+│   ├── config.example.yaml      # configuration (GitHub token, LLM endpoint and model); keys come from environment variables
 │   └── requirements.txt         # Python packages for Steps 1 and 2
 ├── figs/
 │   └── overview.png             # overview of the study (Figure 2 of the paper)
@@ -50,7 +50,7 @@ cutoff date of July 31, 2026 (Section 3.1 of the paper).
 | Issues and PRs that match a keyword | 120,948 |
 | Merged PRs among them (with the issues they close) | 25,474 |
 | PRs whose text mentions both token usage and inefficiency (word filter) | 10,819 |
-| Candidate cases selected by the LLM classifier | 872 |
+| Candidate cases, selected based on the LLM classifier's judgments | 872 |
 | **TI bugs** (labeled, Section 3.2), in 32 harnesses | **486** |
 
 The 32 harnesses with TI bugs include 14 coding agents (168 bugs) and 18 general assistants or agent frameworks (318
@@ -105,7 +105,7 @@ UTF-8, comma-separated, one header row, one row per TI bug. A list in a cell is 
 | Paper part | Data | Script | Reproduces |
 |---|---|---|---|
 | Section 3.1, Step 1 | GitHub (live) | `code/step1_collect.py` | issue and PR counts of the 50 harnesses, keyword matches, merged PRs |
-| Section 3.1, Step 2 | output of Step 1 | `code/step2_classify.py` | word filter (10,819 PRs) and LLM classifier (candidate cases) |
+| Section 3.1, Step 2 | output of Step 1 | `code/step2_classify.py` | word filter (10,819 PRs) and the classifier's judgments, the basis for selecting the candidate cases |
 | Section 3.2 | `data/ti_bugs.csv` | (labels) | the 486 TI bugs and their labels |
 | Section 4.1 (RQ1) | `data/ti_bugs.csv` | `code/step3_results.py` | types, root causes, faulty stop conditions in the main loop versus other call sites |
 | Section 4.2 (RQ2) | `data/ti_bugs.csv` | `code/step3_results.py` | resources and symptoms, how developers noticed the inefficiency, symptoms versus root causes (Cramér's V) |
@@ -148,9 +148,9 @@ RQ3  Fixing Strategies
 pip install -r code/requirements.txt
 cp code/config.example.yaml code/config.yaml
 export GITHUB_TOKEN=...          # Step 1: read-only access to public repositories is enough
-export ANTHROPIC_API_KEY=...     # Step 2
+export ANTHROPIC_API_KEY=...     # Step 2 (or the variable named in llm.api_key_env)
 python3 code/step1_collect.py    # -> work/repo_counts.csv, work/keyword_matches.csv, work/merged_prs.jsonl
-python3 code/step2_classify.py   # -> work/rule_filter.csv, work/candidates.csv
+python3 code/step2_classify.py   # -> work/rule_filter.csv, work/classifier_scores.csv
 ```
 
 - **Step 1** searches the titles and bodies of the issues and PRs of the 50 harnesses for the keywords listed in the
@@ -158,8 +158,13 @@ python3 code/step2_classify.py   # -> work/rule_filter.csv, work/candidates.csv
 - **Step 2** keeps a PR when its text and the text of its issues mention both token usage and inefficiency, then asks an
   LLM, through its API, three questions about each remaining PR: whether it fixes a bug, whether the same task uses fewer
   tokens after the fix, and whether it changes the code, prompts or settings of the harness. The prompt is in
-  `code/step2_classify.py`. The default configuration uses Claude Opus-5 at temperature 0; set the model and the
-  threshold in `code/config.yaml`.
+  `code/step2_classify.py`. The default configuration uses Claude Opus-5 at temperature 0. In `code/config.yaml`,
+  `llm.api` (`anthropic` or `openai`), `llm.base_url` and `llm.model` select any endpoint that speaks the Anthropic
+  Messages API or the OpenAI Chat Completions API, and `llm.api_key_env` names the environment variable that holds its
+  key; `max_tokens` and `temperature` are set there too (some models accept only temperature 1). The script records,
+  for each PR, the probability of a yes to each question and a one-sentence reason; the candidate cases of the paper were
+  selected based on these judgments. An optional `threshold` only marks the PRs whose three probabilities all reach it,
+  to help screening. `--limit N` judges only the first N PRs, to test a setup before a full run.
 - The candidate cases were then labeled with the codebook described in Section 3.2 of the paper; no script repeats this
   step.
 

@@ -1,13 +1,16 @@
-# Copy this file to code/config.yaml. API keys are read from environment variables; never write a key in this file.
+# Copy this file to code/config.yaml and edit it. API keys are read from environment variables; never write a key here.
 cutoff_date: "2026-07-31"        # issues and PRs created on or before this date
 
 github:
   token_env: GITHUB_TOKEN        # Step 1: a GitHub personal access token (read-only public access is enough)
 
-llm:                             # Step 2: the LLM classifier, called through the provider's API
-  provider: anthropic
+llm:                             # Step 2: the LLM classifier
+  api: anthropic                 # API format: anthropic (Messages API) or openai (Chat Completions API)
+  base_url:                      # empty: the provider's own endpoint; set it to use any endpoint that speaks the format above
   model: claude-opus-5           # Claude Opus-5, the model reported in the paper (Section 3.3)
-  api_key_env: ANTHROPIC_API_KEY
+  api_key_env: ANTHROPIC_API_KEY # name of the environment variable that holds the API key
   temperature: 0
-  max_tokens: 300
-  threshold: 0.7                 # a PR is a candidate case when all three probabilities reach this value
+  max_tokens: 300                # raise it for a model that reasons before it answers
+  timeout: 300                   # seconds per request
+  threshold:                     # optional, e.g. 0.7: marks the PRs whose three probabilities all reach it, to help
+                                 # screening; empty: the probabilities are only recorded

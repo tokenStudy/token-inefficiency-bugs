@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""Step 2: select the candidate cases among the merged PRs of Step 1 (Section 3.1).
+"""Step 2: judge the merged PRs of Step 1, as the basis for selecting the candidate cases (Section 3.1).
 
-Two filters, as in the paper:
+Two steps, as in the paper:
 1. A rule filter keeps a PR when the text of the PR and of the issues it closes mentions both token usage (words such
    as "token" and "context") and inefficiency (words such as "repeat" and "unnecessary").
 2. An LLM classifier, called through its API, answers three questions about each remaining PR: whether the PR fixes a
    bug, whether the same task uses fewer tokens after the fix, and whether the PR changes the code, prompts or settings
-   of the harness. A PR becomes a candidate case when every answer is likely (each probability at least the threshold
-   in config.yaml).
+   of the harness. For each PR it gives the probability that each answer is yes, with a one-sentence reason.
 
-The default configuration calls Claude Opus-5 through the Anthropic API; set the API key in the environment variable named
-in config.yaml (default ANTHROPIC_API_KEY). The candidate cases were then labeled with the codebook of Section 3.2;
-data/ti_bugs.csv holds the 486 TI bugs that this labeling identified.
+The paper's 872 candidate cases were selected based on these judgments; the script records the judgments and does not
+select. An optional threshold in config.yaml only marks the PRs whose three probabilities all reach it, to help screening.
 
-usage: python3 code/step2_classify.py [--config code/config.yaml]   ->  work/rule_filter.csv, work/candidates.csv
+The LLM is set in config.yaml (section llm): the API format (anthropic: Messages API; openai: Chat Completions API), an
+optional base_url for any endpoint that speaks that format, the model, the environment variable that holds the API key,
+temperature, max_tokens and the optional threshold. The default is Claude Opus-5 through the Anthropic API (key in
+ANTHROPIC_API_KEY). The candidate cases were then labeled with the codebook of Section 3.2; data/ti_bugs.csv holds the 486
+TI bugs that this labeling identified.
+
+usage: python3 code/step2_classify.py [--config code/config.yaml] [--limit N]
+       -> work/rule_filter.csv, work/classifier_scores.csv   (--limit: judge only the first N PRs, e.g. to test a setup)
 """
 from __future__ import annotations
 
@@ -25,6 +30,7 @@ import re
 import time
 from pathlib import Path
 
+import requests
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -87,14 +93,34 @@ def view(pr):
     return "\n\n".join(parts)
 
 
-def classify(client, cfg, pr):
+DEFAULT_BASE_URL = {"anthropic": "https://api.anthropic.com", "openai": "https://api.openai.com/v1"}
+
+
+def ask(llm, msg):
+    """One request to the configured LLM; returns the text of its reply."""
+    api = llm.get("api", "anthropic")
+    key = os.environ[llm["api_key_env"]]
+    base = (llm.get("base_url") or DEFAULT_BASE_URL[api]).rstrip("/")
+    body = {"model": llm["model"], "max_tokens": llm.get("max_tokens", 300), "temperature": llm.get("temperature", 0),
+            "messages": [{"role": "user", "content": msg}]}
+    if api == "anthropic":
+        r = requests.post(f"{base}/v1/messages", json=body, timeout=llm.get("timeout", 300),
+                          headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
+        r.raise_for_status()
+        return "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
+    if api == "openai":
+        r = requests.post(f"{base}/chat/completions", json=body, timeout=llm.get("timeout", 300),
+                          headers={"Authorization": f"Bearer {key}"})
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"].get("content") or ""
+    raise ValueError(f"llm.api must be anthropic or openai, not {api!r}")
+
+
+def classify(llm, pr):
     msg = PROMPT.format(repo=pr["repo"], view=view(pr))
     for attempt in range(5):
         try:
-            r = client.messages.create(model=cfg["model"], max_tokens=cfg.get("max_tokens", 300),
-                                       temperature=cfg.get("temperature", 0),
-                                       messages=[{"role": "user", "content": msg}])
-            text = "".join(b.text for b in r.content if getattr(b, "type", "") == "text")
+            text = ask(llm, msg)
             return json.loads(text[text.index("{"): text.rindex("}") + 1])
         except Exception as e:  # rate limit, server error or unparsable reply: wait and retry
             last = e
@@ -105,7 +131,9 @@ def classify(client, cfg, pr):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(ROOT / "code/config.yaml"))
-    cfg = yaml.safe_load(open(ap.parse_args().config))
+    ap.add_argument("--limit", type=int, default=None, help="judge only the first N PRs that pass the rule filter")
+    args = ap.parse_args()
+    cfg = yaml.safe_load(open(args.config))
     work = ROOT / "work"
     prs = [json.loads(x) for x in open(work / "merged_prs.jsonl") if x.strip()]
 
@@ -116,21 +144,28 @@ def main():
         w.writerows([pr["repo"], pr["number"], rule_filter(pr)] for pr in prs)
     print(f"rule filter: {len(kept)} of {len(prs)} merged PRs pass", flush=True)
 
-    import anthropic  # imported here so that the rule filter runs without the SDK
     llm = cfg["llm"]
-    client = anthropic.Anthropic(api_key=os.environ[llm["api_key_env"]])
-    th = llm["threshold"]
+    if llm["api_key_env"] not in os.environ:
+        raise SystemExit(f"set the API key in the environment variable {llm['api_key_env']} (llm.api_key_env in the config)")
+    th = llm.get("threshold")  # optional; only marks PRs to help screening
+    if args.limit is not None:
+        kept = kept[:args.limit]
+    qs = ("fix", "fewer_tokens", "harness_change")
     n = 0
-    with open(work / "candidates.csv", "w", newline="") as f:
+    with open(work / "classifier_scores.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["repo", "pr", "pr_url", "fix", "fewer_tokens", "harness_change", "candidate", "reason"])
+        w.writerow(["repo", "pr", "pr_url", *qs, "reason"] + (["reaches_threshold"] if th is not None else []))
         for pr in kept:
-            a = classify(client, llm, pr)
-            cand = min(float(a.get(k, 0)) for k in ("fix", "fewer_tokens", "harness_change")) >= th
-            n += cand
-            w.writerow([pr["repo"], pr["number"], f"https://github.com/{pr['repo']}/pull/{pr['number']}",
-                        a.get("fix"), a.get("fewer_tokens"), a.get("harness_change"), cand, a.get("reason", "")])
-    print(f"LLM classifier: {n} of {len(kept)} PRs are candidate cases", flush=True)
+            a = classify(llm, pr)
+            row = [pr["repo"], pr["number"], f"https://github.com/{pr['repo']}/pull/{pr['number']}",
+                   *(a.get(k) for k in qs), a.get("reason", "")]
+            if th is not None:
+                mark = min(float(a.get(k) or 0) for k in qs) >= th
+                n += mark
+                row.append(mark)
+            w.writerow(row)
+    print(f"LLM classifier ({llm['model']}): judged {len(kept)} PRs"
+          + (f"; {n} reach the threshold {th} on all three questions" if th is not None else ""), flush=True)
 
 
 if __name__ == "__main__":
