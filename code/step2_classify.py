@@ -79,21 +79,11 @@ Reply with JSON only, in this form:
 
 {view}"""
 
-CAPS = {"issue_body": 5000, "issues": 9000, "pr_body": 8000}
-
-
-def cap(s, n):
-    s = (s or "").strip()
-    return s if len(s) <= n else s[:n] + " [...]"
-
 
 def view(pr):
-    parts = []
-    issues = "\n\n".join(f"=== ISSUE #{i['number']}: {i.get('title')}\n{cap(i.get('body'), CAPS['issue_body'])}"
-                         for i in pr["issues"])
-    if issues:
-        parts.append(cap(issues, CAPS["issues"]))
-    parts.append(f"=== MERGED PULL REQUEST #{pr['number']}: {pr.get('title')}\n{cap(pr.get('body'), CAPS['pr_body'])}")
+    """The text the classifier reads: the issues that the PR closes, then the PR itself, in full."""
+    parts = [f"=== ISSUE #{i['number']}: {i.get('title')}\n{(i.get('body') or '').strip()}" for i in pr["issues"]]
+    parts.append(f"=== MERGED PULL REQUEST #{pr['number']}: {pr.get('title')}\n{(pr.get('body') or '').strip()}")
     return "\n\n".join(parts)
 
 
