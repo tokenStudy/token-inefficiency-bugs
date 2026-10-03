@@ -1,0 +1,13 @@
+# Copy this file to code/config.yaml. API keys are read from environment variables; never write a key in this file.
+cutoff_date: "2026-07-31"        # issues and PRs created on or before this date
+
+github:
+  token_env: GITHUB_TOKEN        # Step 1: a GitHub personal access token (read-only public access is enough)
+
+llm:                             # Step 2: the LLM classifier, called through the provider's API
+  provider: anthropic
+  model: claude-opus-5           # Claude Opus-5, the model reported in the paper (Section 3.3)
+  api_key_env: ANTHROPIC_API_KEY
+  temperature: 0
+  max_tokens: 300
+  threshold: 0.7                 # a PR is a candidate case when all three probabilities reach this value
